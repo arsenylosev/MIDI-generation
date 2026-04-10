@@ -1,0 +1,44 @@
+{
+  "tonal": {
+    "edo": 12,
+    "pitch_range": [21, 108],
+    "default_key": 5,
+    "is_major": true
+  },
+  "structure": {
+    "num_beats_per_measure": 4,
+    "num_steps_per_beat": 4,
+    "min_measures": 32,
+    "max_measures": 64,
+    "bpm": 130.0,
+    "phrase_types": ["head_in", "solo_section", "interlude", "trading_fours", "head_out", "coda"],
+    "time_signatures": [[4, 4], [7, 4], [5, 4]]
+  },
+  "gttm": {
+    "grouping_weight": 1.0,
+    "metrical_weight": 1.0,
+    "time_span_weight": 1.0,
+    "prolongational_weight": 1.2,
+    "tension_curve_resolution": 16,
+    "max_prolongational_depth": 6
+  },
+  "bridge": {
+    "num_diffusion_steps": 100,
+    "num_candidates_per_step": 32,
+    "pruning_threshold": 0.1,
+    "max_graph_nodes": 10000,
+    "sinkhorn_iterations": 50,
+    "sinkhorn_epsilon": 0.01
+  },
+  "model": {
+    "hidden_dim": 256,
+    "num_layers": 6,
+    "num_heads": 8,
+    "dropout": 0.1,
+    "latent_dim": 64
+  },
+  "genre": "jazz_fusion",
+  "device": "cpu",
+  "output_dir": "output",
+  "verbose": true
+}
