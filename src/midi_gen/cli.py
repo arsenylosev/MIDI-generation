@@ -3,7 +3,7 @@
 Command-line interface for MIDI generation.
 
 Usage (after ``uv run``):
-    # Generate progressive rock MIDI
+    # Generate progressive rock MIDI (v2 pipeline)
     uv run midi-gen --genre prog_rock --num-samples 2
 
     # Generate jazz fusion MIDI with specific key
@@ -14,6 +14,15 @@ Usage (after ``uv run``):
 
     # Generate with audio rendering
     uv run midi-gen --genre prog_rock --render-audio
+
+    # Generate with guide-audio stems
+    uv run midi-gen --genre prog_rock --guide-audio
+
+    # Run structural evaluation
+    uv run midi-gen --genre prog_rock --evaluate
+
+    # Use legacy pipeline (v1)
+    uv run midi-gen --genre prog_rock --legacy
 """
 
 import argparse
@@ -21,7 +30,6 @@ import argparse
 import numpy as np
 
 from midi_gen.core.config import GenerationConfig
-from midi_gen.core.pipeline import MidiGenerationPipeline
 
 
 def main() -> None:
@@ -91,7 +99,17 @@ def main() -> None:
     parser.add_argument(
         "--render-audio",
         action="store_true",
-        help="Also render MIDI to audio (WAV)",
+        help="Also render MIDI to audio (WAV) using legacy single-mix renderer",
+    )
+    parser.add_argument(
+        "--guide-audio",
+        action="store_true",
+        help="Render per-stem guide audio channels (v2 pipeline only)",
+    )
+    parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="Run structural evaluation on generated output",
     )
     parser.add_argument(
         "--soundfont",
@@ -122,14 +140,29 @@ def main() -> None:
         default=None,
         help="Path to JSON configuration file",
     )
+    parser.add_argument(
+        "--legacy",
+        action="store_true",
+        help="Use the legacy v1 pipeline (piano-roll + diffusion)",
+    )
 
     args = parser.parse_args()
+    is_major = not args.minor
 
-    # Create pipeline
-    if args.config:
-        pipeline = MidiGenerationPipeline.from_config_file(args.config)
+    if args.legacy:
+        _run_legacy(args, is_major)
     else:
-        pipeline = MidiGenerationPipeline.from_preset(args.genre)
+        _run_v2(args, is_major)
+
+
+def _run_v2(args, is_major: bool) -> None:
+    """Run the revised v2 pipeline."""
+    from midi_gen.core.pipeline_v2 import MidiGenerationPipelineV2
+
+    if args.config:
+        pipeline = MidiGenerationPipelineV2.from_config_file(args.config)
+    else:
+        pipeline = MidiGenerationPipelineV2.from_preset(args.genre)
 
     # Apply CLI overrides
     if args.seed is not None:
@@ -139,12 +172,76 @@ def main() -> None:
         pipeline.config.verbose = False
     pipeline.config.bridge.num_diffusion_steps = args.diffusion_steps
     pipeline.config.bridge.sinkhorn_iterations = args.sinkhorn_iterations
+    pipeline.config.guide_rendering.enabled = args.guide_audio
+    pipeline.config.evaluation.enabled = args.evaluate
 
-    is_major = not args.minor
-
-    # Generate
     print(f"\n{'=' * 60}")
-    print(f"  MIDI Generation Module v0.1.0")
+    print(f"  MIDI Generation Module v0.2.0 (revised pipeline)")
+    print(f"  Genre: {args.genre}")
+    print(f"  Key: {args.key} ({'major' if is_major else 'minor'})")
+    print(f"  Samples: {args.num_samples}")
+    print(f"  Guide audio: {'yes' if args.guide_audio else 'no'}")
+    print(f"  Evaluation: {'yes' if args.evaluate else 'no'}")
+    print(f"{'=' * 60}\n")
+
+    results = pipeline.generate(
+        num_measures=args.num_measures,
+        key=args.key,
+        is_major=is_major,
+        phrase_string=args.phrase_string,
+        bpm=args.bpm,
+        output_dir=args.output_dir,
+        num_samples=args.num_samples,
+    )
+
+    # Optional legacy audio rendering
+    if args.render_audio:
+        from midi_gen.rendering.audio_renderer import AudioRenderer
+        renderer = AudioRenderer(soundfont_path=args.soundfont, sample_rate=44100)
+        print(f"\n[Audio] Rendering backend: {renderer.backend}")
+        for result in results:
+            audio_path = renderer.render(result["midi_path"])
+            result["audio_path"] = audio_path
+            print(f"[Audio] Rendered: {audio_path}")
+
+    # Summary
+    print(f"\n{'=' * 60}")
+    print(f"  Generation Summary")
+    print(f"{'=' * 60}")
+    for i, result in enumerate(results):
+        print(f"\n  Sample {i + 1}:")
+        print(f"    MIDI:       {result['midi_path']}")
+        print(f"    Form:       {result['form_string']}")
+        print(f"    Beats:      {result['num_beats']}")
+        print(f"    Duration:   {result['duration_seconds']:.1f}s")
+        if "audio_path" in result:
+            print(f"    Audio:      {result['audio_path']}")
+        if "guide_dir" in result:
+            print(f"    Guides:     {result['guide_dir']}")
+        if "evaluation_overall" in result:
+            print(f"    Eval score: {result['evaluation_overall']:.3f}")
+    print()
+
+
+def _run_legacy(args, is_major: bool) -> None:
+    """Run the legacy v1 pipeline."""
+    from midi_gen.core.pipeline import MidiGenerationPipeline
+
+    if args.config:
+        pipeline = MidiGenerationPipeline.from_config_file(args.config)
+    else:
+        pipeline = MidiGenerationPipeline.from_preset(args.genre)
+
+    if args.seed is not None:
+        pipeline.config.seed = args.seed
+        pipeline.rng = np.random.default_rng(args.seed)
+    if args.quiet:
+        pipeline.config.verbose = False
+    pipeline.config.bridge.num_diffusion_steps = args.diffusion_steps
+    pipeline.config.bridge.sinkhorn_iterations = args.sinkhorn_iterations
+
+    print(f"\n{'=' * 60}")
+    print(f"  MIDI Generation Module v0.1.0 (legacy pipeline)")
     print(f"  Genre: {args.genre}")
     print(f"  Key: {args.key} ({'major' if is_major else 'minor'})")
     print(f"  Samples: {args.num_samples}")
@@ -160,10 +257,8 @@ def main() -> None:
         num_samples=args.num_samples,
     )
 
-    # Optional audio rendering
     if args.render_audio:
         from midi_gen.rendering.audio_renderer import AudioRenderer
-
         renderer = AudioRenderer(soundfont_path=args.soundfont, sample_rate=44100)
         print(f"\n[Audio] Rendering backend: {renderer.backend}")
         for result in results:
@@ -171,7 +266,6 @@ def main() -> None:
             result["audio_path"] = audio_path
             print(f"[Audio] Rendered: {audio_path}")
 
-    # Summary
     print(f"\n{'=' * 60}")
     print(f"  Generation Summary")
     print(f"{'=' * 60}")

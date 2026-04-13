@@ -6,29 +6,40 @@ A modular, research-oriented MIDI generation system that combines the **Generati
 
 ---
 
-## Architecture Overview
+## Architecture Overview (v0.2.0)
+
+The v0.2.0 architecture introduces a **native beat-level state schema** and a **sparse candidate generation + learned scoring** paradigm, replacing the raw piano-roll internal representation.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                   MIDI Generation Module                │
 │                                                         │
 │  ┌──────────┐   ┌──────────┐   ┌────────────────────┐  │
-│  │  GTTM    │──▶│  SB      │──▶│  Diffusion Model   │  │
-│  │  Prior   │   │  Solver  │   │  (Piano-Roll Gen)  │  │
+│  │  GTTM    │──▶│  SB      │──▶│  Sparse Candidate  │  │
+│  │  Prior   │   │  Solver  │   │  Generator & Gating│  │
 │  └──────────┘   └──────────┘   └────────────────────┘  │
 │       │                              │                  │
 │       ▼                              ▼                  │
-│  Phrase Structure             (2, T, 128) Piano-Roll    │
-│  + Tension Curve              + Metadata + Form String  │
+│  Phrase Structure             Candidate Next States     │
+│  + Tension Curve                     │                  │
+│                                      ▼                  │
+│  ┌──────────┐   ┌──────────┐   ┌────────────────────┐  │
+│  │  Corpus  │──▶│  Learned │◀──│  Compact           │  │
+│  │ Ingestion│   │  Scorer  │   │  Transformer       │  │
+│  └──────────┘   └──────────┘   └────────────────────┘  │
+│                                      │                  │
+│                                      ▼                  │
+│                                Beat-Level Sequence      │
+│                                      │                  │
+│                                      ▼                  │
+│  ┌──────────┐   ┌──────────┐   ┌────────────────────┐  │
+│  │  Guide   │◀──│Multitrack│◀──│  Texture Planner   │  │
+│  │ Renderer │   │ Realizer │   │  & Note Decoder    │  │
+│  └──────────┘   └──────────┘   └────────────────────┘  │
 │                                                         │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │            WSG Adapter (optional)                │   │
 │  │  Formats output for whole-song-gen pipeline      │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │         Audio Renderer (optional)                │   │
-│  │  FluidSynth / Pure-Python sine-wave fallback     │   │
 │  └──────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -39,10 +50,11 @@ A modular, research-oriented MIDI generation system that combines the **Generati
 |-------|-----------|-------------|
 | 1 | **GTTM Structural Prior** | Generates phrase structure, metrical grid, and tension curve using GTTM-informed rules for progressive rock and jazz fusion |
 | 2 | **Schrödinger Bridge Solver** | Computes optimal harmonic trajectory between structural waypoints using Sinkhorn-regularized optimal transport |
-| 3 | **Diffusion Model** | Generates detailed piano-roll texture conditioned on phrase structure and tension curve |
-| 4 | **Structural Guidance** | Blends diffusion output with SB trajectory for harmonic coherence and diatonic filtering |
-| 5 | **MIDI Output** | Converts piano-roll to MIDI with metadata, compatible with whole-song-gen format |
-| 6 | **Audio Rendering** (optional) | Renders MIDI to WAV via FluidSynth or pure-Python synthesis |
+| 3 | **Sparse Candidate Generator** | Proposes musically legal next beat-level states using 6 strict gating rules (meter, harmonic rhythm, region, chord, melody, groove) |
+| 4 | **Learned Candidate Scorer** | Ranks candidates using a compact causal transformer trained on the corpus (with heuristic fallback) |
+| 5 | **Multitrack Realizer** | Translates the beat-level sequence into full multitrack MIDI (melody, chords, bass, drums) via texture planning |
+| 6 | **Guide-Audio Rendering** | Renders the multitrack MIDI into per-stem guide audio channels for downstream conditioning |
+| 7 | **Evaluation Framework** | Computes structural metrics (boundary clarity, cadence arrival, harmonic rhythm) |
 
 ---
 
@@ -74,7 +86,7 @@ uv sync --all-extras
 - NumPy >= 1.24
 - pretty_midi >= 0.2.10
 - (Optional) midi2audio for FluidSynth rendering
-- (Optional) PyTorch >= 2.0 for GPU-accelerated generation
+- (Optional) PyTorch >= 2.0 for the learned candidate scorer
 
 ---
 
@@ -82,29 +94,30 @@ uv sync --all-extras
 
 ### Command Line
 
-The package installs a `midi-gen` CLI tool that you can run via `uv`:
+The package installs a `midi-gen` CLI tool that you can run via `uv`. The v0.2.0 pipeline is now the default.
 
 ```bash
-# Generate progressive rock MIDI (32 measures, C major)
+# Generate progressive rock MIDI using the v2 pipeline
 uv run midi-gen --genre prog_rock --num-measures 32 --key 0
 
-# Generate jazz fusion MIDI (24 measures, F major, with audio)
+# Generate jazz fusion MIDI with guide-audio rendering
 uv run midi-gen --genre jazz_fusion --num-measures 24 --key 5 --render-audio
 
-# Generate with specific form structure
-uv run midi-gen --genre prog_rock --phrase-string i4A8B8C12S8A8o4
-
-# Reproducible generation with seed
-uv run midi-gen --genre prog_rock --seed 42 --num-samples 3
+# Run the legacy v1 pipeline (diffusion-based)
+uv run midi-gen --genre prog_rock --pipeline v1
 ```
 
-### Python API
+### Python API (v2 Pipeline)
 
 ```python
-from midi_gen.core.pipeline import MidiGenerationPipeline
+from midi_gen.core.pipeline_v2 import PipelineV2
+from midi_gen.core.config import GenerationConfig
 
-# Create pipeline from preset
-pipeline = MidiGenerationPipeline.from_preset("prog_rock")
+# Load configuration
+config = GenerationConfig.from_json("configs/prog_rock.json")
+
+# Create pipeline
+pipeline = PipelineV2(config)
 
 # Generate MIDI
 results = pipeline.generate(
@@ -118,37 +131,47 @@ results = pipeline.generate(
 for result in results:
     print(f"MIDI: {result['midi_path']}")
     print(f"Form: {result['form_string']}")
-    print(f"Notes: {result['num_notes']}")
     print(f"Duration: {result['duration_seconds']:.1f}s")
-
-    # Access whole-song-gen compatible data
-    wsg_input = result['whole_song_gen_input']
-    print(f"WSG phrase string: {wsg_input['phrase_string']}")
+    
+    # Access structural evaluation metrics
+    metrics = result['evaluation_metrics']
+    print(f"Boundary Clarity: {metrics['boundary_clarity']:.2f}")
 ```
 
-### Integration with whole-song-gen
+### Corpus Ingestion
+
+The v0.2.0 architecture includes a corpus ingestion pipeline to train the candidate scorer:
 
 ```python
-from midi_gen.core.wsg_adapter import WholeSongGenAdapter
+from midi_gen.corpus.ingestor import CorpusIngestor, DataTier
 
-# Initialize adapter with path to whole-song-gen repository
-adapter = WholeSongGenAdapter("/path/to/whole-song-gen")
+ingestor = CorpusIngestor()
 
-# Option 1: Provide form-level input
-form_input = adapter.create_form_input(
-    phrase_string="i4A8B8C12S8A8o4",
-    key=0,
-    is_major=True
+# Ingest a directory of MIDI files into the GOLD tier
+entries = ingestor.ingest_directory(
+    directory="data/raw/prog_rock",
+    tier=DataTier.GOLD,
+    genre="prog_rock"
 )
 
-# Option 2: Run whole-song-gen pipeline directly (requires pretrained models)
-adapter.run_whole_song_gen(
-    phrase_string="i4A8B8C12S8A8o4",
-    key=0,
-    is_major=True,
-    output_dir="demo_output"
-)
+# Save the ingested corpus
+ingestor.save_corpus("data/processed/corpus.json")
 ```
+
+---
+
+## Native State Schema
+
+The core of the v0.2.0 architecture is the `BeatLevelState` schema, which represents music as a sequence of structural tokens rather than a raw piano-roll:
+
+1. `meter_token`: Encoded time-signature class (e.g., 4/4, 7/8, 5/4)
+2. `beat_position`: 0-indexed position within the current measure
+3. `boundary_level`: Hierarchical boundary strength (0=none, 1=sub-phrase, 2=phrase, 3=section)
+4. `region_label`: Section / key-region identifier
+5. `chord_label`: Integer encoding of the current chord (root * 12 + quality)
+6. `harmonic_role`: Functional role in the current key (tonic, dominant, etc.)
+7. `melodic_head`: MIDI pitch of the most salient melodic note
+8. `groove_token`: Categorical groove-family index
 
 ---
 
@@ -164,27 +187,8 @@ Two genre presets are provided:
 | Default Key | C major | F major |
 | Phrase Types | intro, theme_a, theme_b, development, solo, recapitulation, coda | head_in, solo_section, interlude, trading_fours, head_out, coda |
 | Time Signatures | 4/4, 7/8, 5/4, 6/8 | 4/4, 7/4, 5/4 |
-| Prolongational Weight | 1.5 | 1.2 |
-| Tension Resolution | 32 | 16 |
-
-### Custom Configuration
-
-```python
-from midi_gen.core.config import GenerationConfig
-
-# Load from JSON
-config = GenerationConfig.from_json("configs/prog_rock.json")
-
-# Modify parameters
-config.structure.bpm = 120.0
-config.bridge.num_diffusion_steps = 200
-config.tonal.default_key = 7  # G
-
-# Create pipeline
-pipeline = MidiGenerationPipeline(config)
-```
-
-See `configs/prog_rock.json` and `configs/jazz_fusion.json` for full configuration examples.
+| Max Melody Interval | 12 (Octave) | 14 (Major 9th) |
+| Chord Distance | 3 (Circle of Fifths) | 4 |
 
 ---
 
@@ -194,133 +198,39 @@ Each generation produces a directory containing:
 
 ```
 output/prog_rock_20260410_s0/
-├── generation.mid          # MIDI file
-├── generation.wav          # Audio file (if --render-audio)
-├── metadata.json           # Full generation metadata
+├── generation.mid          # Multitrack MIDI file
+├── guide_audio/            # Guide audio stems (if --render-audio)
+│   ├── mix.wav
+│   ├── melody.wav
+│   ├── chords.wav
+│   ├── bass.wav
+│   └── drums.wav
+├── metadata.json           # Full generation metadata & evaluation metrics
 ├── form.txt                # Human-readable form description
-├── piano_roll.npy          # Raw piano-roll array (2, T, 128)
+├── beat_sequence.json      # Native beat-level state sequence
 └── tension_curve.npy       # Tension curve array
-```
-
-### Piano-Roll Format
-
-The piano-roll uses the same `(2, T, 128)` format as whole-song-gen:
-- **Channel 0**: Onset events (binary)
-- **Channel 1**: Sustain events (binary)
-- **T**: Number of time steps (16th-note resolution at 4 steps per beat)
-- **128**: Full MIDI pitch range
-
-### whole-song-gen Compatibility
-
-The `whole_song_gen_input` dictionary in each result contains:
-- `piano_roll`: The generated `(2, T, 128)` array
-- `phrase_string`: Form string (e.g., `"i4A8B8C12S8A8o4"`)
-- `key`: Tonic pitch class (0-11)
-- `is_major`: Boolean key mode
-- `phrase_structure`: List of phrase dictionaries
-
----
-
-## Theoretical Background
-
-### GTTM (Generative Theory of Tonal Music)
-
-The module implements four components from Lerdahl and Jackendoff's GTTM:
-
-1. **Grouping Structure**: Hierarchical segmentation of music into phrases, informed by genre-specific templates
-2. **Metrical Structure**: Multi-level beat hierarchy with configurable time signatures
-3. **Time-Span Reduction**: Tonal distance computation using the pitch-class circle of fifths
-4. **Prolongational Reduction**: Tension-relaxation curves that guide harmonic progression
-
-### Schrödinger Bridge
-
-The SB solver frames music generation as an optimal transport problem:
-- **Start/End States**: Defined by phrase boundary waypoints
-- **Energy Function**: GTTM-based transition energy combining tonal distance, metrical congruence, tension alignment, and grouping coherence
-- **Sinkhorn Regularization**: Ensures smooth, entropy-regularized trajectories
-- **Coarse-to-Fine**: Operates at measure-level resolution, then upsamples
-
-### Diffusion Model
-
-A lightweight diffusion model generates detailed piano-roll textures:
-- Linear or cosine noise schedule
-- Tension-guided noise prediction
-- Post-processing with onset/sustain consistency enforcement
-- Diatonic filtering based on key signature
-
----
-
-## Project Structure
-
-```
-MIDI-generation/
-├── pyproject.toml             # uv project configuration
-├── uv.lock                    # Locked dependencies
-├── README.md
-├── LICENSE
-├── src/
-│   └── midi_gen/              # Main Python package
-│       ├── core/              # Pipeline and config
-│       ├── gttm/              # Structural prior
-│       ├── bridge/            # SB solver
-│       ├── models/            # Diffusion model
-│       ├── utils/             # MIDI I/O
-│       └── rendering/         # Audio rendering
-├── configs/                   # JSON presets
-├── tests/                     # Pytest suite
-├── scripts/                   # Standalone scripts
-└── docs/
-    └── research/              # Tracked research documents
 ```
 
 ---
 
 ## Development Roadmap
 
-### Current State (v0.1.0 — Demo)
+### Current State (v0.2.0 — Structural Pipeline)
 
-- Rule-based GTTM structural prior with genre-specific templates
-- Numpy-based Schrödinger Bridge solver with Sinkhorn regularization
-- Lightweight diffusion model (untrained, random initialization)
-- Full pipeline with MIDI output and optional audio rendering
-- whole-song-gen format compatibility
+- Native beat-level state schema replacing raw piano-roll
+- Sparse candidate generator with 6 strict gating rules
+- Compact transformer candidate scorer (with heuristic fallback)
+- Multitrack bar-level realizer (melody, chords, bass, drums)
+- Corpus ingestion pipeline with Gold/Silver/Bronze tiers
+- Guide-audio renderer for downstream conditioning
+- Structural evaluation framework
 
-### Next Steps (v0.2.0 — Trained Model)
+### Next Steps (v0.3.0 — Training & Integration)
 
-- [ ] Train diffusion U-Net on POP909 / Lakh MIDI datasets
-- [ ] Implement PyTorch-based U-Net with attention layers
-- [ ] Add GPU acceleration for SB solver
-- [ ] Integrate with whole-song-gen pretrained models
-- [ ] Add evaluation metrics (FID, pitch-class histogram distance)
-
-### Future (v1.0.0 — Production)
-
-- [ ] Fine-tune on progressive rock and jazz fusion MIDI corpora
-- [ ] Implement learned GTTM prior (replace rule-based)
-- [ ] Add real-time generation mode
-- [ ] Support for multi-track generation (melody, bass, chords, drums)
-- [ ] Integration with MIDI-to-audio neural synthesizers (DiffSynth, MIDI-DDSP)
-
----
-
-## Testing
-
-```bash
-# Run all tests using uv
-uv run pytest tests/ -v
-
-# Run with coverage
-uv run pytest tests/ --cov=src/midi_gen
-```
-
----
-
-## References
-
-1. Lerdahl, F., & Jackendoff, R. (1983). *A Generative Theory of Tonal Music*. MIT Press.
-2. Wang, Z., et al. (2024). *Whole-Song Hierarchical Generation of Symbolic Music Using Cascaded Diffusion Models*. AAAI.
-3. De Bortoli, V., et al. (2021). *Diffusion Schrödinger Bridge with Applications to Score-Based Generative Modeling*. NeurIPS.
-4. Ho, J., et al. (2020). *Denoising Diffusion Probabilistic Models*. NeurIPS.
+- [ ] Train the candidate scorer on a large corpus of progressive rock and jazz fusion MIDI
+- [ ] Implement the full whole-song-gen integration using the guide-audio stems
+- [ ] Add GPU acceleration for the SB solver
+- [ ] Expand the multitrack realizer with more texture codes
 
 ---
 

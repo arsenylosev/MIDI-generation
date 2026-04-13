@@ -90,14 +90,78 @@ class RenderingConfig:
 
 
 @dataclass
+class CandidateConfig:
+    """Configuration for the sparse candidate generator."""
+    max_candidates: int = 64
+    meter_gating: bool = True
+    harmonic_rhythm_gating: bool = True
+    region_gating: bool = True
+    chord_gating: bool = True
+    melody_gating: bool = True
+    groove_gating: bool = True
+
+
+@dataclass
+class ScorerConfig:
+    """Configuration for the learned candidate scorer."""
+    embed_dim: int = 32
+    num_heads: int = 4
+    num_layers: int = 3
+    context_length: int = 16
+    checkpoint_path: Optional[str] = None
+    use_scorer: bool = False  # disabled until trained
+
+
+@dataclass
+class RealizerConfig:
+    """Configuration for the multitrack bar-level realizer."""
+    velocity_base: int = 80
+    enabled: bool = True
+
+
+@dataclass
+class CorpusConfig:
+    """Configuration for corpus ingestion."""
+    data_dir: str = "data"
+    quantize_resolution: int = 4
+    transpose_to_c: bool = True
+    context_length: int = 16
+
+
+@dataclass
+class GuideRenderingConfig:
+    """Configuration for guide-audio rendering."""
+    enabled: bool = False
+    sample_rate: int = 44100
+    output_stems: bool = True
+    output_phrases: bool = True
+
+
+@dataclass
+class EvaluationConfig:
+    """Configuration for structural evaluation."""
+    enabled: bool = True
+    run_challenge_sets: bool = False
+
+
+@dataclass
 class GenerationConfig:
     """Master configuration for the entire generation pipeline."""
+    # Legacy components
     tonal: TonalConfig = field(default_factory=TonalConfig)
     structure: StructureConfig = field(default_factory=StructureConfig)
     gttm: GTTMConfig = field(default_factory=GTTMConfig)
     bridge: BridgeConfig = field(default_factory=BridgeConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     rendering: RenderingConfig = field(default_factory=RenderingConfig)
+
+    # New components (revised strategy)
+    candidates: CandidateConfig = field(default_factory=CandidateConfig)
+    scorer: ScorerConfig = field(default_factory=ScorerConfig)
+    realizer: RealizerConfig = field(default_factory=RealizerConfig)
+    corpus: CorpusConfig = field(default_factory=CorpusConfig)
+    guide_rendering: GuideRenderingConfig = field(default_factory=GuideRenderingConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     genre: str = "prog_rock"
     seed: Optional[int] = None
