@@ -14,28 +14,28 @@ The v0.2.0 architecture introduces a **native beat-level state schema** and a **
 ┌─────────────────────────────────────────────────────────┐
 │                   MIDI Generation Module                │
 │                                                         │
-│  ┌──────────┐   ┌──────────┐   ┌────────────────────┐  │
-│  │  GTTM    │──▶│  SB      │──▶│  Sparse Candidate  │  │
-│  │  Prior   │   │  Solver  │   │  Generator & Gating│  │
-│  └──────────┘   └──────────┘   └────────────────────┘  │
+│  ┌──────────┐   ┌──────────┐   ┌────────────────────┐   │
+│  │  GTTM    │──▶│  SB      │──▶│  Sparse Candidate  │   │
+│  │  Prior   │   │  Solver  │   │  Generator & Gating│   │
+│  └──────────┘   └──────────┘   └────────────────────┘   │
 │       │                              │                  │
 │       ▼                              ▼                  │
 │  Phrase Structure             Candidate Next States     │
 │  + Tension Curve                     │                  │
 │                                      ▼                  │
-│  ┌──────────┐   ┌──────────┐   ┌────────────────────┐  │
-│  │  Corpus  │──▶│  Learned │◀──│  Compact           │  │
-│  │ Ingestion│   │  Scorer  │   │  Transformer       │  │
-│  └──────────┘   └──────────┘   └────────────────────┘  │
+│  ┌──────────┐   ┌──────────┐   ┌────────────────────┐   │
+│  │  Corpus  │──▶│  Learned │◀──│  Compact           │   │
+│  │ Ingestion│   │  Scorer  │   │  Transformer       │   │
+│  └──────────┘   └──────────┘   └────────────────────┘   │
 │                                      │                  │
 │                                      ▼                  │
 │                                Beat-Level Sequence      │
 │                                      │                  │
 │                                      ▼                  │
-│  ┌──────────┐   ┌──────────┐   ┌────────────────────┐  │
-│  │  Guide   │◀──│Multitrack│◀──│  Texture Planner   │  │
-│  │ Renderer │   │ Realizer │   │  & Note Decoder    │  │
-│  └──────────┘   └──────────┘   └────────────────────┘  │
+│  ┌──────────┐   ┌──────────┐   ┌────────────────────┐   │
+│  │  Guide   │◀──│Multitrack│◀──│  Texture Planner   │   │
+│  │ Renderer │   │ Realizer │   │  & Note Decoder    │   │
+│  └──────────┘   └──────────┘   └────────────────────┘   │
 │                                                         │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │            WSG Adapter (optional)                │   │
