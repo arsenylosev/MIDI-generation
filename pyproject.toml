@@ -1,6 +1,6 @@
 [project]
 name = "midi-generation"
-version = "0.2.0"
+version = "0.3.0"
 description = "GTTM-informed Schrödinger Bridge MIDI generation with beat-level structural tokens, multitrack realization, and guide-audio rendering"
 readme = "README.md"
 license = {text = "MIT"}
@@ -41,6 +41,18 @@ audio = [
 torch = [
     "torch>=2.0",
 ]
+# Gold-tier data ingestion: GuitarPro parser, iReal Pro parser, Lakh filter
+ingest-gold = [
+    "pyguitarpro>=0.9",
+    "beautifulsoup4>=4.12",
+    "tables>=3.8",
+]
+# Bronze-tier data ingestion: source separation + transcription
+ingest-bronze = [
+    "demucs>=4.0",
+    "basic-pitch>=0.3",
+    "librosa>=0.10",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -49,6 +61,12 @@ dev = [
 all = [
     "midi2audio>=0.1.1",
     "torch>=2.0",
+    "pyguitarpro>=0.9",
+    "beautifulsoup4>=4.12",
+    "tables>=3.8",
+    "demucs>=4.0",
+    "basic-pitch>=0.3",
+    "librosa>=0.10",
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.4",
